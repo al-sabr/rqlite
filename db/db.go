@@ -22,6 +22,7 @@ const (
 
 	numExecutions      = "executions"
 	numExecutionErrors = "execution_errors"
+	numTransactions    = "transactions"
 	numQueries         = "queries"
 	numETx             = "execute_transactions"
 	numQTx             = "query_transactions"
@@ -38,6 +39,7 @@ func init() {
 	stats = expvar.NewMap("db")
 	stats.Add(numExecutions, 0)
 	stats.Add(numExecutionErrors, 0)
+	stats.Add(numTransactions, 0)
 	stats.Add(numQueries, 0)
 	stats.Add(numETx, 0)
 	stats.Add(numQTx, 0)
@@ -174,6 +176,11 @@ func (db *DB) TransactionActive() bool {
 func (db *DB) AbortTransaction() error {
 	_, err := db.Execute([]string{`ROLLBACK`}, false, false)
 	return err
+}
+
+// BeginTransaction creates a new transaction and returns it.
+func (db *DB) BeginTransaction() (driver.Tx, error) {
+	return db.sqlite3conn.Begin()
 }
 
 // Execute executes queries that modify the database.

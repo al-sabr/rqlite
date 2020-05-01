@@ -18,6 +18,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+	"github.com/sony/sonyflake"
+	"database/sql/driver"
 
 	"github.com/hashicorp/raft"
 	"github.com/hashicorp/raft-boltdb"
@@ -91,6 +93,12 @@ type QueryRequest struct {
 	Freshness time.Duration
 }
 
+// TxObject represents either an existing or newly created tansaction
+type TxObject struct{
+	Tx driver.Tx
+	ID uint64
+}
+
 // ExecuteRequest represents a query that returns now rows, but does modify
 // the database.
 type ExecuteRequest struct {
@@ -141,7 +149,8 @@ type Store struct {
 
 	metaMu sync.RWMutex
 	meta   map[string]map[string]string
-
+	transactions map[uint64]*TxObject
+	
 	logger *log.Logger
 
 	ShutdownOnRemove  bool
@@ -452,6 +461,10 @@ func (s *Store) Stats() (map[string]interface{}, error) {
 	return status, nil
 }
 
+// Transaction create a new SQLite transaction and returns its ID
+func (s *Store) Transaction(mode string, id uint64) (*TxObject, error) {
+	return s.transaction(mode, id)
+}
 // Execute executes queries that return no rows, but do modify the database.
 func (s *Store) Execute(ex *ExecuteRequest) ([]*sql.Result, error) {
 	if s.raft.State() != raft.Leader {
@@ -480,6 +493,41 @@ func (s *Store) ExecuteOrAbort(ex *ExecuteRequest) (results []*sql.Result, retEr
 		}
 	}()
 	return s.execute(ex)
+}
+
+func (s *Store) transaction(mode string, ID uint64) (*TxObject, error){
+	var result *TxObject = nil
+
+	/* if (id > 0)
+		result =  */
+	if (mode == "BEGIN"){
+		tx, err := s.db.BeginTransaction()
+		if err != nil {
+			return nil, err
+		}
+
+		flake := sonyflake.NewSonyflake(sonyflake.Settings{})
+
+		uuid, err := flake.NextID()
+		if err != nil {
+			log.Fatalf("flake.NextID() failed with %s\n", err)
+		}
+
+		result = &TxObject{
+			Tx: tx,
+			ID: uuid,
+		}
+
+		s.transactions[uuid] = result
+
+	}else if (mode == "COMMIT"){
+		tx := s.transactions[ID]
+		if tx != nil{
+			tx.Tx.Comm
+		}
+	}
+	
+	return result, nil
 }
 
 func (s *Store) execute(ex *ExecuteRequest) ([]*sql.Result, error) {

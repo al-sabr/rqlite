@@ -2,11 +2,8 @@
 package main
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
@@ -17,11 +14,9 @@ import (
 	"time"
 
 	"github.com/rqlite/rqlite/auth"
-	"github.com/rqlite/rqlite/cluster"
 	"github.com/rqlite/rqlite/disco"
 	httpd "github.com/rqlite/rqlite/http"
 	"github.com/rqlite/rqlite/store"
-	"github.com/rqlite/rqlite/tcp"
 )
 
 const logo = `
@@ -156,7 +151,7 @@ func main() {
 	startProfile(cpuProfile, memProfile)
 
 	// Create internode network layer.
-	var tn *tcp.Transport
+	/* var tn *tcp.Transport
 	if nodeEncrypt {
 		log.Printf("enabling node-to-node encryption with cert: %s, key: %s", nodeX509Cert, nodeX509Key)
 		tn = tcp.NewTLSTransport(nodeX509Cert, nodeX509Key, noVerify)
@@ -165,7 +160,7 @@ func main() {
 	}
 	if err := tn.Open(raftAddr); err != nil {
 		log.Fatalf("failed to open internode network layer: %s", err.Error())
-	}
+	} */
 
 	// Create and open the store.
 	dataPath, err := filepath.Abs(dataPath)
@@ -202,7 +197,7 @@ func main() {
 	}
 
 	// Determine join addresses, if necessary.
-	ja, err := store.JoinAllowed(dataPath)
+	/* ja, err := store.JoinAllowed(dataPath)
 	if err != nil {
 		log.Fatalf("unable to determine if join permitted: %s", err.Error())
 	}
@@ -215,7 +210,7 @@ func main() {
 		}
 	} else {
 		log.Println("node is already member of cluster, skip determining join addresses")
-	}
+	} */
 
 	// Now, open store.
 	if err := str.Open(len(joins) == 0); err != nil {
@@ -232,7 +227,7 @@ func main() {
 	}
 
 	// Execute any requested join operation.
-	if len(joins) > 0 {
+	/* if len(joins) > 0 {
 		log.Println("join addresses are:", joins)
 		advAddr := raftAddr
 		if raftAdv != "" {
@@ -260,15 +255,15 @@ func main() {
 
 	} else {
 		log.Println("no join addresses set")
-	}
+	} */
 
 	// Wait until the store is in full consensus.
-	openTimeout, err := time.ParseDuration(raftOpenTimeout)
+	/* openTimeout, err := time.ParseDuration(raftOpenTimeout)
 	if err != nil {
 		log.Fatalf("failed to parse Raft open timeout %s: %s", raftOpenTimeout, err.Error())
 	}
 	str.WaitForLeader(openTimeout)
-	str.WaitForApplied(openTimeout)
+	str.WaitForApplied(openTimeout) */
 
 	// This may be a standalone server. In that case set its own metadata.
 	if err := str.SetMetadata(meta); err != nil && err != store.ErrNotLeader {

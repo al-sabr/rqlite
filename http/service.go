@@ -3,9 +3,11 @@
 package http
 
 import (
+	"strconv"
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"expvar"
@@ -28,6 +30,9 @@ import (
 
 // Store is the interface the Raft-based database must implement.
 type Store interface {
+	// Transaction create a transaction that can be tracked later.
+	Transaction(string, uint64) (*TxObject, error)
+
 	// Execute executes a slice of queries, each of which is not expected
 	// to return rows. If timings is true, then timing information will
 	// be return. If tx is true, then either all queries will be executed
@@ -94,10 +99,11 @@ type Response struct {
 var stats *expvar.Map
 
 const (
-	numExecutions = "executions"
-	numQueries    = "queries"
-	numBackups    = "backups"
-	numLoad       = "loads"
+	numExecutions   = "executions"
+	numTransactions = "transactions"
+	numQueries      = "queries"
+	numBackups      = "backups"
+	numLoad         = "loads"
 
 	// PermAll means all actions permitted.
 	PermAll = "all"
@@ -107,6 +113,8 @@ const (
 	PermRemove = "remove"
 	// PermExecute means user can access execute endpoint.
 	PermExecute = "execute"
+	// PermTransaction means user can start transactions
+	PermTransaction = "transaction"
 	// PermQuery means user can access query endpoint
 	PermQuery = "query"
 	// PermStatus means user can retrieve node status.
@@ -122,6 +130,7 @@ const (
 
 func init() {
 	stats = expvar.NewMap("http")
+	stats.Add(numTransactions, 0)
 	stats.Add(numExecutions, 0)
 	stats.Add(numQueries, 0)
 	stats.Add(numBackups, 0)
@@ -162,8 +171,8 @@ type Service struct {
 	Expvar bool
 	Pprof  bool
 
-	BuildInfo map[string]interface{}
-
+	BuildInfo    map[string]interface{}
+	
 	logger *log.Logger
 }
 
@@ -232,6 +241,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case strings.HasPrefix(r.URL.Path, "/db/transaction"):
+		stats.Add(numTransactions, 1)
+		s.handleTransaction(w, r)
 	case strings.HasPrefix(r.URL.Path, "/db/execute"):
 		stats.Add(numExecutions, 1)
 		s.handleExecute(w, r)
@@ -540,7 +552,7 @@ func (s *Service) handleStatus(w http.ResponseWriter, r *http.Request) {
 			status[k] = stat
 		}
 	}()
-
+	dfg
 	pretty, _ := isPretty(r)
 	var b []byte
 	if pretty {
@@ -556,6 +568,76 @@ func (s *Service) handleStatus(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 	}
+}
+
+// handleTransaction handles queries that modify the database.
+func (s *Service) handleTransaction(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if !s.CheckRequestPerm(r, PermTransaction) {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	resp := NewResponse()
+
+	/* isTx, err := isTx(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	} */
+
+	timings, err := timings(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	b, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	r.Body.Close()
+
+	queries := []string{}
+	if err := json.Unmarshal(b, &queries); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	
+	hasTxID, err := hasTxID(r)
+	if err != nil{
+		return
+	}
+
+	if hasTxID{
+		transactionID, _ := txIDParam(r)
+	}
+	var mode string = queries[0]
+
+	switch mode {
+	case "BEGIN":
+		tx, err := s.store.Transaction(mode, 0)
+		s.transactions[tx.ID] = tx
+	case "COMMIT":
+		tx, err := s.store.Transaction(mode, transactionID)
+	}
+
+	result := map[string]interface{}{
+		"transaction":  map[string]interface{}{
+			"action": mode,
+			"id": tx.ID,
+		},
+	}
+
+	resp.end = time.Now()
+	writeResponse(w, r, resp)
 }
 
 // handleExecute handles queries that modify the database.
@@ -895,6 +977,21 @@ func isPretty(req *http.Request) (bool, error) {
 // isTx returns whether the HTTP request is requesting a transaction.
 func isTx(req *http.Request) (bool, error) {
 	return queryParam(req, "transaction")
+}
+
+// hasTxId returns whether the HTTP request is providing a transaction id.
+func hasTxID(req *http.Request) (bool, error) {
+	return queryParam(req, "TxId")
+}
+
+// txIdParam returns the value for URL param 'q', if present.
+func txIDParam(req *http.Request) (uint64, error) {
+	q := req.URL.Query()
+	result, err := strconv.ParseUint(q.Get("TxId"), 10, 64)
+	if err != nil{
+		return 0, err
+	}
+	return result, nil
 }
 
 // noLeader returns whether processing should skip the leader check.
