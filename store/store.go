@@ -537,7 +537,7 @@ func (s *Store) transaction(mode string, ID uint64) (*TxObject, error) {
 		s.transactions[uuid] = result
 
 	} else if mode == "COMMIT" {
-		tx, err := getTransaction(ID)
+		tx, err := s.getTransaction(ID)
 		if err != nil {
 			return nil, err
 		}

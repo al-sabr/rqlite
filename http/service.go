@@ -30,7 +30,7 @@ import (
 // Store is the interface the Raft-based database must implement.
 type Store interface {
 	// Transaction create a transaction that can be tracked later.
-	Transaction(string, uint64) (*TxObject, error)
+	Transaction(string, uint64) (*store.TxObject, error)
 
 	// Execute executes a slice of queries, each of which is not expected
 	// to return rows. If timings is true, then timing information will
@@ -551,7 +551,7 @@ func (s *Service) handleStatus(w http.ResponseWriter, r *http.Request) {
 			status[k] = stat
 		}
 	}()
-	dfg
+
 	pretty, _ := isPretty(r)
 	var b []byte
 	if pretty {
@@ -615,18 +615,19 @@ func (s *Service) handleTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var transactionID uint64
 	if hasTxID {
 		transactionID, _ := txIDParam(r)
 	}
 
 	var mode string = queries[0]
 
-	var tx TxObject
+	var tx *store.TxObject
 	var successCommit bool
 	switch mode {
 	case "BEGIN":
 		tx, err = s.store.Transaction(mode, 0)
-		s.transactions[tx.ID] = tx
+
 	case "COMMIT":
 		tx, err = s.store.Transaction(mode, transactionID)
 		if err != nil {
@@ -643,6 +644,8 @@ func (s *Service) handleTransaction(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	json, err := json.Marshal(result)
+	w.Write(json)
 	resp.end = time.Now()
 	writeResponse(w, r, resp)
 }
