@@ -3,11 +3,9 @@
 package http
 
 import (
-	"strconv"
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
-	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"expvar"
@@ -20,6 +18,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -171,8 +170,8 @@ type Service struct {
 	Expvar bool
 	Pprof  bool
 
-	BuildInfo    map[string]interface{}
-	
+	BuildInfo map[string]interface{}
+
 	logger *log.Logger
 }
 
@@ -610,29 +609,36 @@ func (s *Service) handleTransaction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	hasTxID, err := hasTxID(r)
-	if err != nil{
+	if err != nil {
 		return
 	}
 
-	if hasTxID{
+	if hasTxID {
 		transactionID, _ := txIDParam(r)
 	}
 	var mode string = queries[0]
 
+	var tx TxObject
+	var successCommit bool
 	switch mode {
 	case "BEGIN":
-		tx, err := s.store.Transaction(mode, 0)
+		tx, err = s.store.Transaction(mode, 0)
 		s.transactions[tx.ID] = tx
 	case "COMMIT":
-		tx, err := s.store.Transaction(mode, transactionID)
+		tx, err = s.store.Transaction(mode, transactionID)
+		if err != nil {
+			return
+		}
+		successCommit = true
 	}
 
 	result := map[string]interface{}{
-		"transaction":  map[string]interface{}{
-			"action": mode,
-			"id": tx.ID,
+		"transaction": map[string]interface{}{
+			"action":        mode,
+			"id":            tx.ID,
+			"successCommit": successCommit,
 		},
 	}
 
@@ -988,7 +994,7 @@ func hasTxID(req *http.Request) (bool, error) {
 func txIDParam(req *http.Request) (uint64, error) {
 	q := req.URL.Query()
 	result, err := strconv.ParseUint(q.Get("TxId"), 10, 64)
-	if err != nil{
+	if err != nil {
 		return 0, err
 	}
 	return result, nil

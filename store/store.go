@@ -5,6 +5,7 @@ package store
 
 import (
 	"bytes"
+	"database/sql/driver"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -18,11 +19,11 @@ import (
 	"sort"
 	"sync"
 	"time"
+
 	"github.com/sony/sonyflake"
-	"database/sql/driver"
 
 	"github.com/hashicorp/raft"
-	"github.com/hashicorp/raft-boltdb"
+	raftboltdb "github.com/hashicorp/raft-boltdb"
 	sql "github.com/rqlite/rqlite/db"
 )
 
@@ -94,7 +95,7 @@ type QueryRequest struct {
 }
 
 // TxObject represents either an existing or newly created tansaction
-type TxObject struct{
+type TxObject struct {
 	Tx driver.Tx
 	ID uint64
 }
@@ -147,10 +148,10 @@ type Store struct {
 	raftStable raft.StableStore      // Persistent k-v store.
 	boltStore  *raftboltdb.BoltStore // Physical store.
 
-	metaMu sync.RWMutex
-	meta   map[string]map[string]string
+	metaMu       sync.RWMutex
+	meta         map[string]map[string]string
 	transactions map[uint64]*TxObject
-	
+
 	logger *log.Logger
 
 	ShutdownOnRemove  bool
@@ -465,6 +466,7 @@ func (s *Store) Stats() (map[string]interface{}, error) {
 func (s *Store) Transaction(mode string, id uint64) (*TxObject, error) {
 	return s.transaction(mode, id)
 }
+
 // Execute executes queries that return no rows, but do modify the database.
 func (s *Store) Execute(ex *ExecuteRequest) ([]*sql.Result, error) {
 	if s.raft.State() != raft.Leader {
@@ -495,12 +497,12 @@ func (s *Store) ExecuteOrAbort(ex *ExecuteRequest) (results []*sql.Result, retEr
 	return s.execute(ex)
 }
 
-func (s *Store) transaction(mode string, ID uint64) (*TxObject, error){
+func (s *Store) transaction(mode string, ID uint64) (*TxObject, error) {
 	var result *TxObject = nil
 
 	/* if (id > 0)
-		result =  */
-	if (mode == "BEGIN"){
+	result =  */
+	if mode == "BEGIN" {
 		tx, err := s.db.BeginTransaction()
 		if err != nil {
 			return nil, err
@@ -520,13 +522,14 @@ func (s *Store) transaction(mode string, ID uint64) (*TxObject, error){
 
 		s.transactions[uuid] = result
 
-	}else if (mode == "COMMIT"){
+	} else if mode == "COMMIT" {
 		tx := s.transactions[ID]
-		if tx != nil{
-			tx.Tx.Comm
+		delete(s.transactions, ID)
+		if tx != nil {
+			tx.Tx.Commit()
 		}
 	}
-	
+
 	return result, nil
 }
 
