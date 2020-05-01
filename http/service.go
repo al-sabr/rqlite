@@ -618,6 +618,7 @@ func (s *Service) handleTransaction(w http.ResponseWriter, r *http.Request) {
 	if hasTxID {
 		transactionID, _ := txIDParam(r)
 	}
+
 	var mode string = queries[0]
 
 	var tx TxObject

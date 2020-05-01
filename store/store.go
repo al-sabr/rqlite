@@ -106,6 +106,7 @@ type ExecuteRequest struct {
 	Queries []string
 	Timings bool
 	Tx      bool
+	TxID    uint64
 }
 
 // ConsistencyLevel represents the available read consistency levels.
@@ -467,6 +468,11 @@ func (s *Store) Transaction(mode string, id uint64) (*TxObject, error) {
 	return s.transaction(mode, id)
 }
 
+// GetTransaction looks for existing transaction based on ID
+func (s *Store) GetTransaction(ID uint64) (*TxObject, error) {
+	return s.GetTransaction(ID)
+}
+
 // Execute executes queries that return no rows, but do modify the database.
 func (s *Store) Execute(ex *ExecuteRequest) ([]*sql.Result, error) {
 	if s.raft.State() != raft.Leader {
@@ -497,6 +503,14 @@ func (s *Store) ExecuteOrAbort(ex *ExecuteRequest) (results []*sql.Result, retEr
 	return s.execute(ex)
 }
 
+func (s *Store) getTransaction(ID uint64) (*TxObject, error) {
+	tx := s.transactions[ID]
+	if tx == nil {
+		return nil, errors.New("Request transaction is non-existent")
+	}
+	return tx, nil
+}
+
 func (s *Store) transaction(mode string, ID uint64) (*TxObject, error) {
 	var result *TxObject = nil
 
@@ -523,11 +537,12 @@ func (s *Store) transaction(mode string, ID uint64) (*TxObject, error) {
 		s.transactions[uuid] = result
 
 	} else if mode == "COMMIT" {
-		tx := s.transactions[ID]
-		delete(s.transactions, ID)
-		if tx != nil {
-			tx.Tx.Commit()
+		tx, err := getTransaction(ID)
+		if err != nil {
+			return nil, err
 		}
+		tx.Tx.Commit()
+		delete(s.transactions, ID)
 	}
 
 	return result, nil
@@ -536,6 +551,7 @@ func (s *Store) transaction(mode string, ID uint64) (*TxObject, error) {
 func (s *Store) execute(ex *ExecuteRequest) ([]*sql.Result, error) {
 	d := &databaseSub{
 		Tx:      ex.Tx,
+		TxID:    ex.TxID,
 		Queries: ex.Queries,
 		Timings: ex.Timings,
 	}
