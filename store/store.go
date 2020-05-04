@@ -96,8 +96,9 @@ type QueryRequest struct {
 
 // TxObject represents either an existing or newly created tansaction
 type TxObject struct {
-	Tx driver.Tx
-	ID uint64
+	Tx       driver.Tx
+	ID       uint64
+	Commited bool
 }
 
 // ExecuteRequest represents a query that returns now rows, but does modify
@@ -201,6 +202,9 @@ func (s *Store) Open(enableSingle bool) error {
 	if err := os.MkdirAll(s.raftDir, 0755); err != nil {
 		return err
 	}
+
+	// Create transactions map
+	s.transactions = make(map[uint64]*TxObject)
 
 	// Open underlying database.
 	db, err := s.open()
@@ -470,7 +474,7 @@ func (s *Store) Transaction(mode string, id uint64) (*TxObject, error) {
 
 // GetTransaction looks for existing transaction based on ID
 func (s *Store) GetTransaction(ID uint64) (*TxObject, error) {
-	return s.GetTransaction(ID)
+	return s.getTransaction(ID)
 }
 
 // Execute executes queries that return no rows, but do modify the database.
@@ -537,11 +541,20 @@ func (s *Store) transaction(mode string, ID uint64) (*TxObject, error) {
 		s.transactions[uuid] = result
 
 	} else if mode == "COMMIT" {
-		tx, err := s.getTransaction(ID)
+		tx, err := s.GetTransaction(ID)
+
 		if err != nil {
 			return nil, err
 		}
-		tx.Tx.Commit()
+		if tx == nil {
+			return nil, nil
+		}
+		err = tx.Tx.Commit()
+		if err != nil {
+			return nil, err
+		}
+		tx.Commited = true
+		result = tx
 		delete(s.transactions, ID)
 	}
 

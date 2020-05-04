@@ -94,6 +94,13 @@ type Response struct {
 	end   time.Time
 }
 
+// TransactionResult result as JSON
+type TransactionResult struct {
+	ID            string `json:"id,omitempty"`
+	Action        string `json:"mode,omitempty"`
+	SuccessCommit string `json:"successCommit,omitempty"`
+}
+
 // stats captures stats for the HTTP service.
 var stats *expvar.Map
 
@@ -462,8 +469,18 @@ func (s *Service) handleLoad(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body.Close()
 
+	hasTxID, err := hasTxID(r)
+	if err != nil {
+		return
+	}
+
+	var transactionID uint64
+	if hasTxID {
+		transactionID, _ = txIDParam(r)
+	}
+
 	queries := []string{string(b)}
-	results, err := s.store.ExecuteOrAbort(&store.ExecuteRequest{queries, timings, false})
+	results, err := s.store.ExecuteOrAbort(&store.ExecuteRequest{queries, timings, false, transactionID})
 	if err != nil {
 		if err == store.ErrNotLeader {
 			leader := s.leaderAPIAddr()
@@ -591,11 +608,11 @@ func (s *Service) handleTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	} */
 
-	timings, err := timings(r)
+	/* timings, err := timings(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
+	} */
 
 	b, err := ioutil.ReadAll(r.Body)
 	if err != nil {
@@ -617,37 +634,50 @@ func (s *Service) handleTransaction(w http.ResponseWriter, r *http.Request) {
 
 	var transactionID uint64
 	if hasTxID {
-		transactionID, _ := txIDParam(r)
+		transactionID, _ = txIDParam(r)
 	}
 
 	var mode string = queries[0]
 
 	var tx *store.TxObject
-	var successCommit bool
 	switch mode {
 	case "BEGIN":
 		tx, err = s.store.Transaction(mode, 0)
-
 	case "COMMIT":
 		tx, err = s.store.Transaction(mode, transactionID)
 		if err != nil {
 			return
 		}
-		successCommit = true
 	}
 
-	result := map[string]interface{}{
-		"transaction": map[string]interface{}{
-			"action":        mode,
-			"id":            tx.ID,
-			"successCommit": successCommit,
-		},
-	}
-
-	json, err := json.Marshal(result)
-	w.Write(json)
 	resp.end = time.Now()
-	writeResponse(w, r, resp)
+
+	if tx != nil {
+		transaction := &TransactionResult{
+			ID:            strconv.FormatUint(tx.ID, 10),
+			Action:        mode,
+			SuccessCommit: strconv.FormatBool(tx.Commited),
+		}
+		// Build the status response.
+		result := map[string]interface{}{
+			"transaction": transaction,
+			"time":        resp.end,
+		}
+
+		var bresult []byte
+		bresult, err = json.Marshal(result)
+
+		_, err = w.Write([]byte(bresult))
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	} else {
+		_, err = w.Write([]byte("error"))
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}
+
 }
 
 // handleExecute handles queries that modify the database.
@@ -691,7 +721,17 @@ func (s *Service) handleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := s.store.Execute(&store.ExecuteRequest{queries, timings, isTx})
+	hasTxID, err := hasTxID(r)
+	if err != nil {
+		return
+	}
+
+	var transactionID uint64 = 0
+	if hasTxID {
+		transactionID, _ = txIDParam(r)
+	}
+
+	results, err := s.store.Execute(&store.ExecuteRequest{queries, timings, isTx, transactionID})
 	if err != nil {
 		if err == store.ErrNotLeader {
 			leader := s.leaderAPIAddr()
